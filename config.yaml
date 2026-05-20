@@ -1,0 +1,65 @@
+# A 股扫描 — 全局配置
+
+# 股票池
+universe:
+  # akshare 提供的成分股接口；当前默认取全市场 A 股
+  source: hs300_zz500                   # a_shares_all | hs300_zz500 | by_market_cap
+  # 仅当 source=by_market_cap 时生效（单位：CNY）
+  min_market_cap_cny: 10_000_000_000    # 100 亿
+  # 是否剔除 ST/*ST/退市整理股
+  exclude_st: false
+  # 是否排除北交所（北证代码以 8/4 开头，部分用户不交易）
+  exclude_bj: false
+  refresh_days: 7                       # universe 缓存有效期（天）
+  cache_path: data/universe.csv
+
+# 日线数据
+prices:
+  lookback_days: 500                    # 回看窗口 ~2 年（覆盖三推 + HTF）
+  adjust: qfq                           # qfq=前复权 / hfq=后复权 / "" 不复权
+  cache_dir: data/prices                # parquet 存储目录
+  max_workers: 6                        # akshare 单股请求并发数 (sina/eastmoney 限频敏感)
+  request_sleep_sec: 0.1                # 单线程内每次请求间的最小间隔
+  sources:                              # 抓取源优先级 (sina 较稳定；eastmoney 字段更全但限频严)
+    - sina
+    - eastmoney
+
+# MACD 三重背离参数
+macd:
+  fast: 12
+  slow: 26
+  signal: 9
+  divergence:
+    min_area_reduction: 0.10
+    dif_zero_tolerance: 0.0
+    dif_approach_zero_ratio: 0.50
+    min_price_increase_pct: 0.001
+    recency_bars: 30
+
+# ZigZag 摆动检测
+swing:
+  pct_threshold: 0.03                   # 3% 反转阈值
+
+# ICT OB / FVG
+ob_fvg:
+  ob_displacement_atr: 2.0
+  fvg_min_size_atr: 0.3
+  atr_period: 14
+
+# PA 三推
+three_push:
+  pullback_target_pct: 0.75
+  pullback_tolerance: 0.15              # ±15% → [60%, 90%]
+  max_unfilled_pda_count: 2
+
+# 输出
+output:
+  csv_dir: output
+  log_dir: output/logs
+  charts_dir: output/charts
+
+# 运行时
+runtime:
+  log_level: INFO
+  request_timeout_sec: 30
+  currency_symbol: "¥"                  # 图表/CSV 中显示的货币符号
