@@ -91,8 +91,43 @@ def fetch_all_a_shares_spot() -> pd.DataFrame | None:
     return df
 
 
+def fetch_sina_a_shares_spot() -> pd.DataFrame | None:
+    """Sina 全 A 股快照（适用于海外 IP，~5500 只，无市值字段）。带 3 次重试。"""
+    import akshare as ak
+    logger.info("Fetching A-share spot via sina ...")
+    df = None
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            df = ak.stock_zh_a_spot()
+            if df is not None and not df.empty:
+                break
+        except Exception as e:
+            last_err = e
+            wait = 2.0 + attempt * 2.0
+            logger.warning("sina spot attempt %d failed: %s; sleep %.1fs",
+                           attempt + 1, e, wait)
+            time.sleep(wait)
+    if df is None or df.empty:
+        logger.error("sina spot 3 次重试均失败: %s", last_err)
+        return None
+
+    rename = {"代码": "ticker", "名称": "name", "最新价": "last_price"}
+    cols = {k: v for k, v in rename.items() if k in df.columns}
+    out = df.rename(columns=cols)[list(cols.values())].copy()
+    # sina 的代码字段带 sh/sz 前缀（如 "sh600000"），去掉
+    out["ticker"] = out["ticker"].astype(str).str.replace(r"^(sh|sz|bj)", "", regex=True).str.zfill(6)
+    out = out.drop_duplicates("ticker")
+    out["market"] = out["ticker"].map(_classify_market)
+    out["market_cap"] = pd.NA
+    out["float_market_cap"] = pd.NA
+    out["source"] = "a_shares_all"
+    logger.info("Sina A-share spot: %d rows", len(out))
+    return out
+
+
 def fetch_a_shares_codes_only() -> pd.DataFrame:
-    """降级路径：仅获取 code+name，不含市值。"""
+    """最后兜底：从交易所官网直接拉清单（仅代码+名称，无市值，海外 IP 可能 reset）。"""
     import akshare as ak
     logger.info("Fetching A-share code-name list (no market cap) ...")
     df = ak.stock_info_a_code_name()
@@ -178,7 +213,10 @@ def build_universe(force_refresh: bool = False) -> pd.DataFrame:
         except Exception as e:
             logger.warning("Cache read failed (%s); refreshing", e)
 
+    # universe 抓取优先级：eastmoney (国内最快) → sina (海外稳定) → None
     spot = fetch_all_a_shares_spot()
+    if spot is None:
+        spot = fetch_sina_a_shares_spot()
 
     if source == "hs300_zz500":
         hs300 = fetch_index_constituents("000300", "hs300")
@@ -203,7 +241,12 @@ def build_universe(force_refresh: bool = False) -> pd.DataFrame:
         if spot is None:
             if source == "by_market_cap":
                 raise RuntimeError("by_market_cap 需要市值快照，但 spot 抓取失败")
-            df = fetch_a_shares_codes_only()
+            try:
+                df = fetch_a_shares_codes_only()
+            except Exception as e:
+                raise RuntimeError(
+                    f"全市场 universe 抓取全部失败 (eastmoney/sina/exchange-direct): {e}"
+                )
         else:
             df = spot.copy()
             if source == "by_market_cap":
