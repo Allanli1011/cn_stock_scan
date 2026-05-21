@@ -14,10 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import platform
+
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib import font_manager
 
 from .config import load_config
 from .indicators.macd import compute_macd, detect_triple_divergence as detect_macd
@@ -28,19 +31,45 @@ from .indicators.three_push import ThreePushResult, detect_three_push
 logger = logging.getLogger(__name__)
 Direction = Literal["top", "bottom"]
 
-# 中文字体（按优先级回退）。覆盖 Windows / macOS / Linux(GitHub Actions) 三类环境。
+# 中文字体配置：按平台精准设置，**把当前平台的 CJK 字体放在列表最前**。
+# 必须这样做的原因：matplotlib 的 findfont 会"模糊匹配"，如果列表第一个找不到，
+# 它常会回退到一个相似度高的非 CJK 字体（如 DejaVu Sans），导致中文渲染成方框。
+
+def _pick_cjk_fonts() -> list[str]:
+    """探测当前系统已安装的 CJK 字体，按可用性排序返回。"""
+    system_fonts = {f.name for f in font_manager.fontManager.ttflist}
+    plat = platform.system()
+    # 按平台分别准备一份"应该出现"的字体清单
+    if plat == "Windows":
+        candidates = ["Microsoft YaHei", "SimHei", "Microsoft JhengHei", "DengXian"]
+    elif plat == "Darwin":  # macOS
+        candidates = ["PingFang SC", "Hiragino Sans GB", "Heiti SC", "STHeiti", "Songti SC"]
+    else:  # Linux / GitHub Actions
+        candidates = [
+            "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK",
+            "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+            "Source Han Sans SC", "Source Han Sans CN",
+        ]
+    found = [c for c in candidates if c in system_fonts]
+    if not found:
+        # 兜底：扫一遍所有字体，凡名字里带 CJK/Noto/Han/YaHei/SimHei/WenQuanYi 的都收
+        found = sorted({
+            n for n in system_fonts
+            if any(k in n for k in ("CJK", "Noto Sans", "Han Sans",
+                                     "YaHei", "SimHei", "WenQuanYi", "PingFang"))
+        })
+    return found
+
+
+_CJK_FONTS = _pick_cjk_fonts()
 plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = [
-    # Windows
-    "Microsoft YaHei", "SimHei",
-    # macOS
-    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "STHeiti", "Songti SC",
-    # Linux (apt: fonts-noto-cjk / fonts-wqy-microhei)
-    "Noto Sans CJK SC", "Noto Sans CJK", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
-    # 终极兜底
-    "Arial Unicode MS", "DejaVu Sans",
-]
+plt.rcParams["font.sans-serif"] = _CJK_FONTS + ["Arial Unicode MS", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
+if not _CJK_FONTS:
+    logger.warning(
+        "未检测到任何 CJK 字体！中文将被渲染为方框。请安装 fonts-noto-cjk "
+        "(Linux) / SimHei (Windows) / PingFang SC (macOS)"
+    )
 
 
 @dataclass(frozen=True)

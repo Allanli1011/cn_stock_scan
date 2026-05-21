@@ -59,9 +59,21 @@ jobs:
       - name: Install CJK fonts for matplotlib
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
-          # 让 matplotlib 重新发现字体
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk fonts-wqy-microhei
+          # 刷新系统字体缓存 + 干掉 matplotlib 的字体缓存（强制下次重新扫描）
+          sudo fc-cache -fv >/dev/null
           rm -rf ~/.cache/matplotlib
+          # 诊断：让 matplotlib 重建字体表后打印 CJK 字体清单
+          python -c "
+          import matplotlib
+          from matplotlib import font_manager as fm
+          fm._load_fontmanager(try_read_cache=False)
+          all_names = sorted({f.name for f in fm.fontManager.ttflist})
+          cjk = [n for n in all_names if any(k in n for k in
+                 ('CJK','Noto Sans','WenQuanYi','Han Sans'))]
+          print('matplotlib 看到的 CJK 字体:', cjk)
+          assert cjk, '未发现 CJK 字体，中文渲染将失败'
+          "
 
       - name: Restore data cache (universe + prices)
         id: cache-restore
