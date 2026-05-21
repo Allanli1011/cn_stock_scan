@@ -28,11 +28,17 @@ from .indicators.three_push import ThreePushResult, detect_three_push
 logger = logging.getLogger(__name__)
 Direction = Literal["top", "bottom"]
 
-# 中文字体（按优先级回退）。Windows 默认有 SimHei / Microsoft YaHei。
+# 中文字体（按优先级回退）。覆盖 Windows / macOS / Linux(GitHub Actions) 三类环境。
 plt.rcParams["font.family"] = "sans-serif"
 plt.rcParams["font.sans-serif"] = [
-    "Microsoft YaHei", "SimHei", "PingFang SC", "Hiragino Sans GB",
-    "Heiti SC", "STHeiti", "Songti SC", "Arial Unicode MS", "DejaVu Sans",
+    # Windows
+    "Microsoft YaHei", "SimHei",
+    # macOS
+    "PingFang SC", "Hiragino Sans GB", "Heiti SC", "STHeiti", "Songti SC",
+    # Linux (apt: fonts-noto-cjk / fonts-wqy-microhei)
+    "Noto Sans CJK SC", "Noto Sans CJK", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+    # 终极兜底
+    "Arial Unicode MS", "DejaVu Sans",
 ]
 plt.rcParams["axes.unicode_minus"] = False
 

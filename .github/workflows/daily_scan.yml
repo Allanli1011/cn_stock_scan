@@ -1,0 +1,216 @@
+name: Daily A-Share Scan
+
+on:
+  schedule:
+    # 每日 11:00 UTC = 19:00 北京时间，周一到周五 A 股盘后
+    - cron: "0 11 * * 1-5"
+  # 允许手动触发；可调参数验证
+  workflow_dispatch:
+    inputs:
+      min_score:
+        description: "入选最低得分 (0–3)"
+        required: false
+        default: "1.5"
+      plot_top:
+        description: "渲染 top N 张 K 线图"
+        required: false
+        default: "10"
+      direction:
+        description: "扫描方向"
+        required: false
+        default: "both"
+        type: choice
+        options: [both, top, bottom]
+      force_full:
+        description: "强制全量重拉股票池（默认增量）"
+        required: false
+        default: "false"
+        type: boolean
+
+permissions:
+  contents: write   # 写 results 分支
+
+# 同一时刻不并发跑多个扫描，避免对数据源造成压力
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan HS300 + CSI500
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install CJK fonts for matplotlib
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          # 让 matplotlib 重新发现字体
+          rm -rf ~/.cache/matplotlib
+
+      - name: Restore data cache (universe + prices)
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/
+          key: cn-stock-data-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            cn-stock-data-${{ runner.os }}-
+
+      - name: Refresh universe + fetch prices (incremental)
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          set -e
+          if [ "${{ github.event.inputs.force_full }}" = "true" ]; then
+            python -m src.data_fetcher --force-universe --full
+          else
+            python -m src.data_fetcher
+          fi
+
+      - name: Save data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/
+          key: cn-stock-data-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Run scan_full
+        id: scan
+        env:
+          PYTHONIOENCODING: utf-8
+          MIN_SCORE: ${{ github.event.inputs.min_score || '1.5' }}
+          PLOT_TOP: ${{ github.event.inputs.plot_top || '10' }}
+          DIRECTION: ${{ github.event.inputs.direction || 'both' }}
+        run: |
+          set -e
+          python scripts/scan_full.py \
+            --direction "$DIRECTION" \
+            --min-score "$MIN_SCORE" \
+            --plot-top "$PLOT_TOP" 2>&1 | tee scan.log
+          # 暴露今日日期供后续步骤使用 (按上海时区取日期)
+          echo "scan_date=$(TZ=Asia/Shanghai date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Build job summary
+        if: always()
+        env:
+          SCAN_DATE: ${{ steps.scan.outputs.scan_date }}
+        run: |
+          python <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os, pandas as pd, pathlib, datetime
+          d = os.environ.get("SCAN_DATE") or datetime.date.today().isoformat()
+          csv = pathlib.Path(f"output/full_signals_{d}.csv")
+          print(f"# 📊 A 股扫描结果 — {d}\n")
+          if not csv.exists():
+              print(f"⚠️ 未生成 CSV (期望 `{csv}`)")
+              raise SystemExit
+          df = pd.read_csv(csv, dtype={"ticker": str})
+          df["ticker"] = df["ticker"].str.zfill(6)
+          print(f"**信号合计**: {len(df)} 条")
+          if "score" in df.columns and len(df):
+              print("\n## 得分分布\n")
+              print("| 得分 | 数量 |")
+              print("|---:|---:|")
+              for s, n in df["score"].value_counts().sort_index(ascending=False).items():
+                  print(f"| {s} | {n} |")
+              print("\n## Top 20\n")
+              cols = [c for c in [
+                  "ticker", "name", "direction", "signal", "score",
+                  "macd_kind", "macd_passed", "macd_failed_rules",
+                  "three_push_hit", "pda_hit", "pda_quality", "last_close",
+              ] if c in df.columns]
+              top = df.head(20)[cols]
+              print("| " + " | ".join(cols) + " |")
+              print("| " + " | ".join(["---"] * len(cols)) + " |")
+              for _, row in top.iterrows():
+                  print("| " + " | ".join(str(v) for v in row.tolist()) + " |")
+              stacked = df[df["score"] >= 2.5]
+              if len(stacked):
+                  print(f"\n## 🎯 三重共振 (score ≥ 2.5): {len(stacked)}\n")
+                  for _, r in stacked.iterrows():
+                      print(f"- **{r['ticker']} {r.get('name','')}** ({r['signal']}) score={r['score']}")
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-${{ github.run_number }}-${{ steps.scan.outputs.scan_date }}
+          path: |
+            output/*.csv
+            output/charts/*.png
+            scan.log
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Publish to `results` branch
+        if: success()
+        env:
+          SCAN_DATE: ${{ steps.scan.outputs.scan_date }}
+        run: |
+          set -e
+          # 保存生成物到临时目录（切分支前）
+          STAGE=$(mktemp -d)
+          mkdir -p "$STAGE"
+          cp -r output/* "$STAGE/" 2>/dev/null || true
+          if [ -z "$(ls -A "$STAGE" 2>/dev/null)" ]; then
+            echo "::warning::output/ 为空，跳过 publish"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 切到 results 分支（首次创建孤儿分支）
+          if git ls-remote --exit-code --heads origin results >/dev/null 2>&1; then
+            git fetch origin results --depth=1
+            git checkout results
+          else
+            git checkout --orphan results
+            git rm -rf . 2>/dev/null || true
+            # 给 results 分支一个最小 README，方便浏览
+            cat > README.md <<'EOF'
+          # 扫描结果归档
+
+          - `archive/YYYY-MM-DD/` — 按日存档
+          - `latest/` — 永远指向最近一次扫描结果
+
+          所有结果由 `.github/workflows/daily_scan.yml` 自动生成。
+          代码请见 `main` 分支。
+          EOF
+            git add README.md
+          fi
+
+          # 写入今日归档
+          mkdir -p "archive/$SCAN_DATE"
+          cp -r "$STAGE/"* "archive/$SCAN_DATE/" 2>/dev/null || true
+
+          # 刷新 latest/（始终覆盖）
+          rm -rf latest
+          mkdir -p latest
+          cp -r "$STAGE/"* "latest/" 2>/dev/null || true
+
+          git add archive/ latest/ README.md 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "无新内容可提交"
+            exit 0
+          fi
+          git commit -m "Daily scan: $SCAN_DATE (run #${{ github.run_number }})"
+          git push origin results
