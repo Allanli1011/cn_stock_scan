@@ -172,17 +172,13 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
-      - name: Publish to `results` branch
+      - name: Publish to `results/` on main
         if: success()
         env:
           SCAN_DATE: ${{ steps.scan.outputs.scan_date }}
         run: |
           set -e
-          # 保存生成物到临时目录（切分支前）
-          STAGE=$(mktemp -d)
-          mkdir -p "$STAGE"
-          cp -r output/* "$STAGE/" 2>/dev/null || true
-          if [ -z "$(ls -A "$STAGE" 2>/dev/null)" ]; then
+          if [ -z "$(ls -A output 2>/dev/null)" ]; then
             echo "::warning::output/ 为空，跳过 publish"
             exit 0
           fi
@@ -190,39 +186,22 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 切到 results 分支（首次创建孤儿分支）
-          if git ls-remote --exit-code --heads origin results >/dev/null 2>&1; then
-            git fetch origin results --depth=1
-            git checkout results
-          else
-            git checkout --orphan results
-            git rm -rf . 2>/dev/null || true
-            # 给 results 分支一个最小 README，方便浏览
-            cat > README.md <<'EOF'
-          # 扫描结果归档
+          # 写入今日归档（保留历史）
+          mkdir -p "results/archive/$SCAN_DATE"
+          cp -r output/* "results/archive/$SCAN_DATE/" 2>/dev/null || true
 
-          - `archive/YYYY-MM-DD/` — 按日存档
-          - `latest/` — 永远指向最近一次扫描结果
+          # 刷新 latest/（始终覆盖最近一次）
+          rm -rf results/latest
+          mkdir -p results/latest
+          cp -r output/* "results/latest/" 2>/dev/null || true
 
-          所有结果由 `.github/workflows/daily_scan.yml` 自动生成。
-          代码请见 `main` 分支。
-          EOF
-            git add README.md
-          fi
-
-          # 写入今日归档
-          mkdir -p "archive/$SCAN_DATE"
-          cp -r "$STAGE/"* "archive/$SCAN_DATE/" 2>/dev/null || true
-
-          # 刷新 latest/（始终覆盖）
-          rm -rf latest
-          mkdir -p latest
-          cp -r "$STAGE/"* "latest/" 2>/dev/null || true
-
-          git add archive/ latest/ README.md 2>/dev/null || true
+          git add results/
           if git diff --cached --quiet; then
             echo "无新内容可提交"
             exit 0
           fi
-          git commit -m "Daily scan: $SCAN_DATE (run #${{ github.run_number }})"
-          git push origin results
+          # [skip ci] 不是必须 (本 workflow 不在 push 时触发) 但加上更稳
+          git commit -m "chore(results): $SCAN_DATE (run #${{ github.run_number }}) [skip ci]"
+          # 防止本次 push 期间 main 有其他 commit
+          git pull --rebase origin main || true
+          git push origin main

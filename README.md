@@ -1,16 +1,16 @@
 # A 股全市场扫描 (cn_stock_scan)
 
 [![Daily Scan](https://github.com/Allanli1011/cn_stock_scan/actions/workflows/daily_scan.yml/badge.svg)](https://github.com/Allanli1011/cn_stock_scan/actions/workflows/daily_scan.yml)
-[![Latest Results](https://img.shields.io/badge/results-latest-blue)](https://github.com/Allanli1011/cn_stock_scan/tree/results/latest)
+[![Latest Results](https://img.shields.io/badge/results-latest-blue)](https://github.com/Allanli1011/cn_stock_scan/tree/main/results/latest)
 
 参照 [Allanli1011/us-stock-scan](https://github.com/Allanli1011/us-stock-scan) 的逻辑，
 把同一套 **「MACD 三重背离 + PA 三推 75% 回撤 + ICT 周/月 PDA」** 监控体系应用到 A 股。
 支持沪深京全市场 ~5400 只，也可只跑沪深 300 + 中证 500（默认）。
 
 每个 A 股交易日盘后（北京时间 19:00）GitHub Actions 自动跑一次扫描，结果发布到
-[`results` 分支](https://github.com/Allanli1011/cn_stock_scan/tree/results)：
-- `archive/YYYY-MM-DD/` — 历史按日归档
-- `latest/` — 永远指向最近一次扫描结果
+[`results/` 目录](https://github.com/Allanli1011/cn_stock_scan/tree/main/results)：
+- [`results/archive/YYYY-MM-DD/`](https://github.com/Allanli1011/cn_stock_scan/tree/main/results/archive) — 历史按日归档
+- [`results/latest/`](https://github.com/Allanli1011/cn_stock_scan/tree/main/results/latest) — 永远指向最近一次扫描结果
 - 同时也作为 [Actions Artifacts](https://github.com/Allanli1011/cn_stock_scan/actions) 保留 90 天
 
 ## 核心思路
@@ -267,7 +267,7 @@ A: HS300+CSI500（764 只）首拉 ~90 秒，每日增量更新 ~30 秒，扫描
 | 项 | 值 |
 |---|---|
 | 触发 | 周一至周五 19:00 北京时间（盘后） + 手动触发 (`workflow_dispatch`) |
-| 步骤 | 装 Python + akshare + Noto CJK 字体 → 恢复 `data/` 缓存 → 增量拉价格 → `scan_full.py` → 上传 artifacts → 发到 `results` 分支 |
+| 步骤 | 装 Python + akshare + Noto CJK 字体 → 恢复 `data/` 缓存 → 增量拉价格 → `scan_full.py` → 上传 artifacts → 提交到 `main/results/` |
 | 缓存 | `data/` 在 Actions 之间持久化（首次拉全量后日常只做增量），跑一次仅需 1–2 分钟 |
 | 默认参数 | `--direction both --min-score 1.5 --plot-top 10`（可在手动触发时改） |
 | 失败通知 | GitHub 默认邮件通知（仓库 Owner） |
@@ -284,8 +284,8 @@ A: HS300+CSI500（764 只）首拉 ~90 秒，每日增量更新 ~30 秒，扫描
 |---|---|---|
 | Step Summary | Actions 单次运行页顶部 | 得分分布 + Top 20 表格 + 三重共振汇总 |
 | Artifact 下载 | 该次 run 的 Artifacts 区 | 完整 CSV + PNG，保留 90 天 |
-| results 分支 | [`results/latest/`](https://github.com/Allanli1011/cn_stock_scan/tree/results/latest) | 最新结果（在线浏览图表/CSV） |
-| 历史归档 | [`results/archive/`](https://github.com/Allanli1011/cn_stock_scan/tree/results/archive) | 按日存档，可对比不同日期的信号变化 |
+| results 目录 | [`results/latest/`](https://github.com/Allanli1011/cn_stock_scan/tree/main/results/latest) | 最新结果（在线浏览图表/CSV） |
+| 历史归档 | [`results/archive/`](https://github.com/Allanli1011/cn_stock_scan/tree/main/results/archive) | 按日存档，可对比不同日期的信号变化 |
 
 ### 注意事项
 
