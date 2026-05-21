@@ -3,13 +3,13 @@
 # 股票池
 universe:
   # akshare 提供的成分股接口；当前默认取全市场 A 股
-  source: hs300_zz500                   # a_shares_all | hs300_zz500 | by_market_cap
+  source: a_shares_all                  # a_shares_all | hs300_zz500 | by_market_cap
   # 仅当 source=by_market_cap 时生效（单位：CNY）
   min_market_cap_cny: 10_000_000_000    # 100 亿
   # 是否剔除 ST/*ST/退市整理股
-  exclude_st: false
-  # 是否排除北交所（北证代码以 8/4 开头，部分用户不交易）
-  exclude_bj: false
+  exclude_st: true
+  # 是否排除北交所（北证代码以 8/4 开头，流动性差）
+  exclude_bj: true
   refresh_days: 7                       # universe 缓存有效期（天）
   cache_path: data/universe.csv
 
